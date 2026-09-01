@@ -34,26 +34,23 @@ show_help() {
 Simple tool to generate Mender Artifacts suitable for the docker-compose module
 
 Usage: $0 [options] [-- [options-for-mender-artifact] ]
-
-    Options: [ -n|--artifact-name -t|--device-type -o|--output_path -a|--architecture -l|--list-architectures -i|--images-dir -m|--manifests-dir -h|--help -p|--project-name]
-
+    Options: [ -n|--artifact-name -t|--device-type -o|--output_path -a|--architecture -l|--list-architectures -i|--images-dir -m|--manifests-dir -h|--help -p|--project-name --override-os]
         --artifact-name      - Artifact name
         --device-type        - Target device type identification (can be given more than once)
         --output-path        - Path to output artifact file. Default: docker-compose-artifact.mender
         --list-architectures - List the available architectures of the images in the manifests
         --architecture       - The architecture to download the images for. See --list-architectures for available architectures.
+        --override-os        - Override the OS reported for image pulls (e.g. 'linux'). Useful when generating artifacts on a host OS that differs from the target's, such as building linux/arm64 artifacts on macOS.
         --images-dir         - Directory containing container images the composition needs
         --manifests-dir      - Directory containing docker compose manifests
         --project-name       - Name of the docker compose project, must contain only characters from the class $PROJECT_NAME_ALLOWED_REGEX
         --help               - Show help and exit
-
 Anything after a '--' gets passed directly to the mender-artifact tool. See
 'mender-artifact write module-image --help' for details. You may want to
 at least specify '--software-filesystem' to some keyword describing where
 Docker stores images locally, unless it's rootfs (discouraged).
 EOF
 }
-
 check_base_dependencies || exit 1
 
 parse_extra_argument() {
@@ -80,8 +77,8 @@ images_sum=$(dir_tree_files_digest "${temp_dir}/images")
 prepare_base_manifests
 manifests_sum=$(dir_tree_files_digest "${temp_dir}/manifests")
 
-tar -C "${temp_dir}" -cf "${temp_dir}/manifests.tar" manifests
-tar -C "${temp_dir}" -czf "${temp_dir}/images.tar.gz" images
+tar -C "${temp_dir}" --no-xattrs -cf "${temp_dir}/manifests.tar" manifests
+tar -C "${temp_dir}" --no-xattrs -czf "${temp_dir}/images.tar.gz" images
 cat << EOF > "${temp_dir}/meta.json"
 {"version": "1", "project_name": "$project_name"}
 EOF
@@ -99,7 +96,7 @@ checksum_provides_key="${software_name}.checksum"
 
 # There can only be one project handled by the docker-compose Update Module so
 # every new one installed removes any old installed before.
-clears_provides="*mender-docker-compose_*"
+clears_provides="*mender-docker-compose.*"
 
 mender-artifact write module-image \
     --type docker-compose \
