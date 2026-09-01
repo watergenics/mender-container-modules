@@ -80,8 +80,8 @@ images_sum=$(dir_tree_files_digest "${temp_dir}/images")
 prepare_base_manifests
 manifests_sum=$(dir_tree_files_digest "${temp_dir}/manifests")
 
-tar -C "${temp_dir}" -cf "${temp_dir}/manifests.tar" manifests
-tar -C "${temp_dir}" -czf "${temp_dir}/images.tar.gz" images
+tar -C "${temp_dir}" --no-xattrs -cf "${temp_dir}/manifests.tar" manifests
+tar -C "${temp_dir}" --no-xattrs -czf "${temp_dir}/images.tar.gz" images
 cat << EOF > "${temp_dir}/meta.json"
 {"version": "1", "project_name": "$project_name"}
 EOF
