@@ -152,7 +152,7 @@ parse_base_arguments() {
 }
 
 check_base_images() {
-    images=$(sed -n 's/^[[:space:]]*image:[[:space:]]*//p' "${manifests_dir}"/*)
+    images=$(sed -n 's/^[[:space:]]*image:[[:space:]]*//p' "${manifests_dir}"/* | sort -u)
     if [ -z "${images}" ]; then
         echo "No images found in manifests. Aborting." >&2
         show_help_and_exit_error
