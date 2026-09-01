@@ -51,6 +51,7 @@ project_name=""
 manifests_dir=""
 images_dir=""
 architecture=""
+override_os=""
 output_path=""
 list_architectures=false
 
@@ -116,6 +117,13 @@ parse_base_arguments() {
                     show_help_and_exit_error
                 fi
                 architecture=$2
+                shift 2
+                ;;
+            --override-os)
+                if [ -z "$2" ]; then
+                    show_help_and_exit_error
+                fi
+                override_os=$2
                 shift 2
                 ;;
             -h | --help)
@@ -220,7 +228,7 @@ prepare_base_images() {
         for image in $images; do
             file_name=$(echo "$image" | tr '/:@' '_')
             echo "Downloading image: $image"
-            if ! skopeo copy ${architecture:+--override-arch "$architecture"} docker://"$image" docker-archive:"$temp_dir/images/${file_name}.tar":"$image"; then
+            if ! skopeo copy ${architecture:+--override-arch "$architecture"} ${override_os:+--override-os "$override_os"} docker://"$image" docker-archive:"$temp_dir/images/${file_name}.tar":"$image"; then
                 echo "ERROR: Failed to download image: $image" >&2
                 exit 1
             fi
