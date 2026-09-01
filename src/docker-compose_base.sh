@@ -101,7 +101,7 @@ comp_stop() {
     local rc=0
 
     echo "Stopping $1"
-    (   
+    (
         cd "$manifests_dir"
         $DOCKER_COMPOSE_CMD \
             --project-name "$project_name" \
@@ -111,7 +111,7 @@ comp_stop() {
     if test "$rc" -ne 0; then
         echo "Failed to stop composition, logs follow:" 1>&2
         cat "$manifests_dir/../compose.log" 1>&2
-        (   
+        (
             cd "$manifests_dir"
             $DOCKER_COMPOSE_CMD \
                 --project-name "$project_name" \
@@ -160,7 +160,7 @@ comp_start() {
     local rc=0
 
     echo "Starting $1"
-    (   
+    (
         cd "$manifests_dir"
         $DOCKER_COMPOSE_CMD \
             --project-name "$project_name" \
@@ -174,7 +174,7 @@ comp_start() {
     if test "$rc" -ne 0; then
         echo "Failed to start composition, logs follow:" 1>&2
         cat "$manifests_dir/../compose.log" 1>&2
-        (   
+        (
             cd "$manifests_dir"
             $DOCKER_COMPOSE_CMD \
                 --project-name "$project_name" \
@@ -184,17 +184,10 @@ comp_start() {
     return "$rc"
 }
 
-get_manifest_image_ids() {
+get_manifest_image_refs() {
     local manifest="$1"
-    local id
 
-    local image
-    for image in $(grep -E "^\s+image:" "$manifest" | cut -d: -f2-); do
-        id=$($DOCKER_CMD images --format "{{json .ID}}" "$image" | head -n1 | tr -d '"')
-        if [ -n "$id" ]; then
-            echo "$id"
-        fi
-    done
+    grep -E "^\s+image:" "$manifest" | cut -d: -f2- | sed 's/^[[:space:]]*//'
 }
 
 install_composition_from_artifact() {
@@ -230,6 +223,7 @@ install_composition_from_artifact() {
     echo "extracting manifests"
     $TAR_CMD -xf "${artifact_files}/manifests.tar" -C "$TEMP_DIR"
 
+    rm -rf "${PERSISTENT_STORE}/new"
     mkdir -p "${PERSISTENT_STORE}/new"
     cp -r "${TEMP_DIR}/manifests" "${PERSISTENT_STORE}/new/"
     echo "${PROJECT_NAME}" > "${PERSISTENT_STORE}/new/project_name"
@@ -237,7 +231,7 @@ install_composition_from_artifact() {
     local image
     for image in "${TEMP_DIR}/images/"*; do
         if ! container_image_load "$image"; then
-            # Make sure to gather the IDs of loaded images below for cleanup.
+            # Stop loading further images on first failure
             rc=2
             break
         fi
@@ -245,7 +239,9 @@ install_composition_from_artifact() {
 
     local manifest
     for manifest in "${PERSISTENT_STORE}/new/manifests/"*; do
-        get_manifest_image_ids "$manifest" >> "${PERSISTENT_STORE}/new/image_ids"
+        test -f "$manifest" || continue
+        # Always record image_refs for cleanup() to have an accurate list next run
+        get_manifest_image_refs "$manifest" >> "${PERSISTENT_STORE}/new/image_refs"
     done
     if [ $rc -ne 0 ]; then
         return $rc
@@ -303,12 +299,17 @@ cleanup() {
         return 0
     fi
 
-    local image_id
-    while read -r image_id; do
-        if ! grep -qF "$image_id" "${PERSISTENT_STORE}/current/image_ids" 2> /dev/null; then
-            $DOCKER_CMD rmi "$image_id" || rc=1
+    if ! test -f "${PERSISTENT_STORE}/cleanup/image_refs"; then
+        rm -rf "${PERSISTENT_STORE}/cleanup"
+        return 0
+    fi
+
+    local image_ref
+    while read -r image_ref; do
+        if ! grep -qxF "$image_ref" "${PERSISTENT_STORE}/current/image_refs" 2> /dev/null; then
+            $DOCKER_CMD rmi "$image_ref" || rc=1
         fi
-    done < "${PERSISTENT_STORE}/cleanup/image_ids"
+    done < "${PERSISTENT_STORE}/cleanup/image_refs"
     rm -rf "${PERSISTENT_STORE}/cleanup"
 
     return $rc

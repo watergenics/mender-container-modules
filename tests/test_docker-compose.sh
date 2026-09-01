@@ -102,11 +102,11 @@ exit 0
 EOF
     chmod u+x "${WORKDIR}/bin/docker-compose"
 
-    # docker is more tricky, it's used for getting image IDs as well, so there
-    # we at least need to produce some string unique to the invocation, plus we
-    # want it to not provide the 'compose' command to make sure the above
-    # docker-compose mock handles that and we are not interested in the docker
-    # compose discovery
+    # docker: we want it to not provide the 'compose' command so the
+    # docker-compose mock above handles composition commands, and we're not
+    # interested in the docker compose discovery process itself. Image refs
+    # are read directly from the manifest text now (see
+    # get_manifest_image_refs), so no image-ID lookup mocking is needed here.
     cat << EOF > "${WORKDIR}/bin/docker"
 #!/bin/bash
 case "\$1" in
@@ -115,9 +115,6 @@ case "\$1" in
         ;;
      compose)
         exit 1
-        ;;
-     images)
-        cat /proc/sys/kernel/random/uuid
         ;;
      inspect)
         shift 3
@@ -177,8 +174,6 @@ test_artifact_install() {
     cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
-docker images --format {{json .ID}} some/lighttpd:latest
-docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp up --detach
 EOF
     if [ $rc -ne 0 ]; then
@@ -191,8 +186,8 @@ EOF
         echo "New composition doesn't exist at the expected location"
         return 1
     fi
-    if ! [ -f "${PERSISTENT_DIR}/new/image_ids" ]; then
-        echo "Image IDs file doesn't exist at the expected location"
+    if ! [ -f "${PERSISTENT_DIR}/new/image_refs" ]; then
+        echo "Image refs file doesn't exist at the expected location"
         return 1
     fi
 
@@ -223,8 +218,6 @@ test_artifact_install_commit() {
     cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
-docker images --format {{json .ID}} some/lighttpd:latest
-docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp up --detach
 EOF
     if [ $rc -ne 0 ]; then
@@ -237,8 +230,8 @@ EOF
         echo "New composition doesn't exist at the expected location"
         return 1
     fi
-    if ! [ -f "${PERSISTENT_DIR}/current/image_ids" ]; then
-        echo "Image IDs file doesn't exist at the expected location"
+    if ! [ -f "${PERSISTENT_DIR}/current/image_refs" ]; then
+        echo "Image refs file doesn't exist at the expected location"
         return 1
     fi
     if [ -d "${PERSISTENT_DIR}/new" ]; then
@@ -273,8 +266,6 @@ test_artifact_install_rollback() {
     cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
-docker images --format {{json .ID}} some/lighttpd:latest
-docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp up --detach
 docker-compose --project-name test-comp down
 EOF
@@ -321,8 +312,8 @@ test_artifact_install_rollback_cleanup() {
         return $rc
     fi
 
-    local image_id1=$(head -n1 "${PERSISTENT_DIR}/cleanup/image_ids")
-    local image_id2=$(tail -n1 "${PERSISTENT_DIR}/cleanup/image_ids")
+    local image_ref1=$(head -n1 "${PERSISTENT_DIR}/cleanup/image_refs")
+    local image_ref2=$(tail -n1 "${PERSISTENT_DIR}/cleanup/image_refs")
     "${SRCDIR}/docker-compose" Cleanup "${WORKDIR}/artifact-file-tree" >> "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
     if [ $rc -ne 0 ]; then
         echo "Cleanup failed (exit code $rc), logs follow:"
@@ -333,12 +324,10 @@ test_artifact_install_rollback_cleanup() {
     cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
-docker images --format {{json .ID}} some/lighttpd:latest
-docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp up --detach
 docker-compose --project-name test-comp down
-docker rmi $image_id1
-docker rmi $image_id2
+docker rmi $image_ref1
+docker rmi $image_ref2
 EOF
     if [ $rc -ne 0 ]; then
         echo "Unexpected commands executed (see the above diff), logs follow:"
@@ -369,32 +358,6 @@ test_two_artifacts_install_commit_install_commit_cleanup() {
     prepare_config
     prepare_expected_file_tree
     prepare_docker_mock
-
-    # For this test, we need 'docker images...' to return something consistent
-    # between runs that we can easily refer to.
-    cat << EOF > "${WORKDIR}/bin/docker"
-case "\$1" in
-     --version|version)
-        exit 0
-        ;;
-     compose)
-        exit 1
-        ;;
-     images)
-        # return the queried image reference as its ID
-        echo "\$4"
-        ;;
-     inspect)
-        shift 3
-        for container_id in "\$@"; do
-            echo "running:no_check"
-        done
-        exit 0
-        ;;
-esac
-echo "\$(basename \$0) \$@" >> "$CMDLINE_LOGGER_LOG_FILE"
-exit 0
-EOF
 
     "${SRCDIR}/docker-compose" ArtifactInstall "${WORKDIR}/artifact-file-tree" > "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
     if [ $rc -ne 0 ]; then
@@ -458,12 +421,9 @@ EOF
     cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
-docker images --format {{json .ID}} some/lighttpd:latest
-docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp up --detach
 docker-compose --project-name test-comp down
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
-docker images --format {{json .ID}} some/lighttpd:latest
 docker-compose --project-name test-comp up --detach
 docker rmi bad/php:oldest
 EOF
@@ -496,32 +456,6 @@ test_two_artifacts_install_commit_install_rollback_cleanup() {
     prepare_config
     prepare_expected_file_tree
     prepare_docker_mock
-
-    # For this test, we need 'docker images...' to return something consistent
-    # between runs that we can easily refer to.
-    cat << EOF > "${WORKDIR}/bin/docker"
-case "\$1" in
-     --version|version)
-        exit 0
-        ;;
-     compose)
-        exit 1
-        ;;
-     images)
-        # return the queried image reference as its ID
-        echo "\$4"
-        ;;
-     inspect)
-        shift 3
-        for container_id in "\$@"; do
-            echo "running:no_check"
-        done
-        exit 0
-        ;;
-esac
-echo "\$(basename \$0) \$@" >> "$CMDLINE_LOGGER_LOG_FILE"
-exit 0
-EOF
 
     "${SRCDIR}/docker-compose" ArtifactInstall "${WORKDIR}/artifact-file-tree" > "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
     if [ $rc -ne 0 ]; then
@@ -583,12 +517,9 @@ EOF
     cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
-docker images --format {{json .ID}} some/lighttpd:latest
-docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp up --detach
 docker-compose --project-name test-comp down
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
-docker images --format {{json .ID}} bad/php:worst
 docker-compose --project-name test-comp up --detach
 docker-compose --project-name test-comp down
 docker-compose --project-name test-comp up --detach
@@ -635,15 +566,6 @@ case "\$1" in
      compose)
         exit 1
         ;;
-     images)
-        if [ -f "${WORKDIR}/artifact-file-tree/tmp/first_img_query_done" ]; then
-            echo "\$(basename \$0) \$@" >> "$CMDLINE_LOGGER_LOG_FILE"
-            exit 1
-        else
-            touch "${WORKDIR}/artifact-file-tree/tmp/first_img_query_done"
-            cat /proc/sys/kernel/random/uuid
-        fi
-        ;;
      image) # docker image load --input /some/img.tar
         if [ -f "${WORKDIR}/artifact-file-tree/tmp/first_load_done" ]; then
             echo "\$(basename \$0) \$@" >> "$CMDLINE_LOGGER_LOG_FILE"
@@ -679,7 +601,11 @@ EOF
         return $rc
     fi
 
-    local image_id1=$(head -n1 "${PERSISTENT_DIR}/cleanup/image_ids")
+    # Both refs are recorded even though loading the second image failed
+    # get_manifest_image_refs reads the manifest text directly and doesn't
+    # depend on the image having actually loaded.
+    local image_ref1=$(head -n1 "${PERSISTENT_DIR}/cleanup/image_refs")
+    local image_ref2=$(tail -n1 "${PERSISTENT_DIR}/cleanup/image_refs")
     "${SRCDIR}/docker-compose" Cleanup "${WORKDIR}/artifact-file-tree" >> "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
     if [ $rc -ne 0 ]; then
         echo "Cleanup failed (exit code $rc), logs follow:"
@@ -690,10 +616,9 @@ EOF
     cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
-docker images --format {{json .ID}} some/lighttpd:latest
-docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp down
-docker rmi $image_id1
+docker rmi $image_ref1
+docker rmi $image_ref2
 EOF
     if [ $rc -ne 0 ]; then
         echo "Unexpected commands executed (see the above diff), logs follow:"
@@ -763,8 +688,8 @@ EOF
         return $rc
     fi
 
-    local image_id1=$(head -n1 "${PERSISTENT_DIR}/cleanup/image_ids")
-    local image_id2=$(tail -n1 "${PERSISTENT_DIR}/cleanup/image_ids")
+    local image_ref1=$(head -n1 "${PERSISTENT_DIR}/cleanup/image_refs")
+    local image_ref2=$(tail -n1 "${PERSISTENT_DIR}/cleanup/image_refs")
     "${SRCDIR}/docker-compose" Cleanup "${WORKDIR}/artifact-file-tree" >> "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
     if [ $rc -ne 0 ]; then
         echo "Cleanup failed (exit code $rc), logs follow:"
@@ -775,13 +700,11 @@ EOF
     cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
-docker images --format {{json .ID}} some/lighttpd:latest
-docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp up --detach
 docker-compose --project-name test-comp logs
 docker-compose --project-name test-comp down
-docker rmi $image_id1
-docker rmi $image_id2
+docker rmi $image_ref1
+docker rmi $image_ref2
 EOF
     if [ $rc -ne 0 ]; then
         echo "Unexpected commands executed (see the above diff), logs follow:"
@@ -812,32 +735,6 @@ test_two_artifacts_install_commit_install_load_fail_rollback_cleanup() {
     prepare_config
     prepare_expected_file_tree
     prepare_docker_mock
-
-    # For this test, we need 'docker images...' to return something consistent
-    # between runs that we can easily refer to.
-    cat << EOF > "${WORKDIR}/bin/docker"
-case "\$1" in
-     --version|version)
-        exit 0
-        ;;
-     compose)
-        exit 1
-        ;;
-     images)
-        # return the queried image reference as its ID
-        echo "\$4"
-        ;;
-     inspect)
-        shift 3
-        for container_id in "\$@"; do
-            echo "running:no_check"
-        done
-        exit 0
-        ;;
-esac
-echo "\$(basename \$0) \$@" >> "$CMDLINE_LOGGER_LOG_FILE"
-exit 0
-EOF
 
     "${SRCDIR}/docker-compose" ArtifactInstall "${WORKDIR}/artifact-file-tree" > "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
     if [ $rc -ne 0 ]; then
@@ -889,15 +786,6 @@ case "\$1" in
      compose)
         exit 1
         ;;
-     images)
-        if [ -f "${WORKDIR}/artifact-file-tree/tmp/first_img_query_done" ]; then
-            echo "\$(basename \$0) \$@" >> "$CMDLINE_LOGGER_LOG_FILE"
-            exit 1
-        else
-            touch "${WORKDIR}/artifact-file-tree/tmp/first_img_query_done"
-            echo "\$4"
-        fi
-        ;;
      image) # docker image load --input /some/img.tar
         if [ -f "${WORKDIR}/artifact-file-tree/tmp/first_load_done" ]; then
             echo "\$(basename \$0) \$@" >> "$CMDLINE_LOGGER_LOG_FILE"
@@ -940,20 +828,22 @@ EOF
         return $rc
     fi
 
+    # Both the second artifact's refs get removed here, even though only
+    # the first image (lighttpd:best) actually finished loading
+    # neither ref matches a line in current/image_refs (which still holds the
+    # first artifact's lighttpd:latest / bad/php:oldest), so both are correctly
+    # identified as no longer in use.
     cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
-docker images --format {{json .ID}} some/lighttpd:latest
-docker images --format {{json .ID}} bad/php:oldest
 docker-compose --project-name test-comp up --detach
 docker-compose --project-name test-comp down
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
 docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
-docker images --format {{json .ID}} some/lighttpd:best
-docker images --format {{json .ID}} bad/php:worst
 docker-compose --project-name test-comp down
 docker-compose --project-name test-comp up --detach
 docker rmi some/lighttpd:best
+docker rmi bad/php:worst
 EOF
     if [ $rc -ne 0 ]; then
         echo "Unexpected commands executed (see the above diff), logs follow:"
