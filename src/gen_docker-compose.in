@@ -99,7 +99,7 @@ checksum_provides_key="${software_name}.checksum"
 
 # There can only be one project handled by the docker-compose Update Module so
 # every new one installed removes any old installed before.
-clears_provides="*mender-docker-compose_*"
+clears_provides="*mender-docker-compose.*"
 
 mender-artifact write module-image \
     --type docker-compose \
