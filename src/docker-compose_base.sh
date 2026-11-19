@@ -101,7 +101,7 @@ comp_stop() {
     local rc=0
 
     echo "Stopping $1"
-    (   
+    (
         cd "$manifests_dir"
         $DOCKER_COMPOSE_CMD \
             --project-name "$project_name" \
@@ -111,7 +111,7 @@ comp_stop() {
     if test "$rc" -ne 0; then
         echo "Failed to stop composition, logs follow:" 1>&2
         cat "$manifests_dir/../compose.log" 1>&2
-        (   
+        (
             cd "$manifests_dir"
             $DOCKER_COMPOSE_CMD \
                 --project-name "$project_name" \
@@ -160,7 +160,7 @@ comp_start() {
     local rc=0
 
     echo "Starting $1"
-    (   
+    (
         cd "$manifests_dir"
         $DOCKER_COMPOSE_CMD \
             --project-name "$project_name" \
@@ -174,7 +174,7 @@ comp_start() {
     if test "$rc" -ne 0; then
         echo "Failed to start composition, logs follow:" 1>&2
         cat "$manifests_dir/../compose.log" 1>&2
-        (   
+        (
             cd "$manifests_dir"
             $DOCKER_COMPOSE_CMD \
                 --project-name "$project_name" \
