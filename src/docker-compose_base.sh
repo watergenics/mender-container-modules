@@ -274,6 +274,14 @@ install_composition_from_artifact() {
         test -f "$manifest" || continue
         get_manifest_image_ids "$manifest" >> "${PERSISTENT_STORE}/current/image_ids"
     done
+    # multiple services can use the same image
+    # cleanup() and retag_composition_images() need to handle each image once
+    # to avoid the update to return with an error
+    # preserves manifest ordering
+    if [ -f "${PERSISTENT_STORE}/current/image_ids" ]; then
+        awk '!seen[$0]++' "${PERSISTENT_STORE}/current/image_ids" > "${PERSISTENT_STORE}/current/image_ids.tmp"
+        mv "${PERSISTENT_STORE}/current/image_ids.tmp" "${PERSISTENT_STORE}/current/image_ids"
+    fi
     if [ $rc -ne 0 ]; then
         return $rc
     fi
