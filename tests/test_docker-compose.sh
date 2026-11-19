@@ -367,6 +367,103 @@ EOF
 }
 tests+=(test_artifact_install_rollback_cleanup)
 
+test_artifact_install_rollback_cleanup_shared_image() {
+    local rc=0
+
+    prepare_config
+    prepare_expected_file_tree
+    prepare_docker_mock
+
+    # 'docker images...' returns the queried image reference as its ID, so the
+    # IDs in image_ids are predictable.
+    cat << EOF > "${WORKDIR}/bin/docker"
+#!/bin/bash
+case "\$1" in
+     --version|version)
+        exit 0
+        ;;
+     compose)
+        exit 1
+        ;;
+     images)
+        echo "\$4"
+        ;;
+     inspect)
+        shift 3
+        for container_id in "\$@"; do
+            echo "running:no_check"
+        done
+        exit 0
+        ;;
+esac
+echo "\$(basename \$0) \$@" >> "$CMDLINE_LOGGER_LOG_FILE"
+exit 0
+EOF
+
+    # Two services use the same image
+    cat << EOF > "${WORKDIR}/manifests/docker-compose.yml"
+services:
+  lighttpd-a:
+    image: some/lighttpd:latest
+  lighttpd-b:
+    image: some/lighttpd:latest
+  php:
+    image: bad/php:oldest
+EOF
+    tar -C "${WORKDIR}" -cf "${WORKDIR}/artifact-file-tree/files/manifests.tar" manifests
+
+    "${SRCDIR}/docker-compose" ArtifactInstall "${WORKDIR}/artifact-file-tree" > "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -ne 0 ]; then
+        echo "ArtifactInstall failed (exit code $rc), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+    "${SRCDIR}/docker-compose" ArtifactRollback "${WORKDIR}/artifact-file-tree" >> "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -ne 0 ]; then
+        echo "ArtifactRollback failed (exit code $rc), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+
+    if [ -n "$(sort "${PERSISTENT_DIR}/cleanup/image_ids" | uniq -d)" ]; then
+        echo "Duplicate lines in image_ids, contents follow:"
+        cat "${PERSISTENT_DIR}/cleanup/image_ids"
+        return 1
+    fi
+
+    "${SRCDIR}/docker-compose" Cleanup "${WORKDIR}/artifact-file-tree" >> "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -ne 0 ]; then
+        echo "Cleanup failed (exit code $rc), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+
+    cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
+docker images --format {{json .ID}} some/lighttpd:latest
+docker images --format {{json .ID}} some/lighttpd:latest
+docker images --format {{json .ID}} bad/php:oldest
+docker-compose --project-name test-comp up --detach
+docker-compose --project-name test-comp down
+docker rmi --force some/lighttpd:latest
+docker rmi --force bad/php:oldest
+EOF
+    if [ $rc -ne 0 ]; then
+        echo "Unexpected commands executed (see the above diff), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+
+    if [ -d "${PERSISTENT_DIR}/cleanup" ]; then
+        echo "'cleanup' directory exists after cleanup"
+        return 1
+    fi
+
+    return $rc
+}
+tests+=(test_artifact_install_rollback_cleanup_shared_image)
+
 test_two_artifacts_install_commit_install_commit_cleanup() {
     local rc=0
 
