@@ -35,7 +35,7 @@ Simple tool to generate Mender Artifacts suitable for the docker-compose module
 
 Usage: $0 [options] [-- [options-for-mender-artifact] ]
 
-    Options: [ -n|--artifact-name -t|--device-type -o|--output_path -a|--architecture -l|--list-architectures -i|--images-dir -m|--manifests-dir -h|--help -p|--project-name]
+    Options: [ -n|--artifact-name -t|--device-type -o|--output_path -a|--architecture -l|--list-architectures -i|--images-dir -m|--manifests-dir -h|--help -p|--project-name --override-os ]
 
         --artifact-name      - Artifact name
         --device-type        - Target device type identification (can be given more than once)
@@ -45,6 +45,7 @@ Usage: $0 [options] [-- [options-for-mender-artifact] ]
         --images-dir         - Directory containing container images the composition needs
         --manifests-dir      - Directory containing docker compose manifests
         --project-name       - Name of the docker compose project, must contain only characters from the class $PROJECT_NAME_ALLOWED_REGEX
+        --override-os        - Override the OS reported for image pulls (e.g. 'linux'). Useful when generating artifacts on a host OS that differs from the target's, such as building linux/arm64 artifacts on macOS.
         --help               - Show help and exit
 
 Anything after a '--' gets passed directly to the mender-artifact tool. See
@@ -80,8 +81,8 @@ images_sum=$(dir_tree_files_digest "${temp_dir}/images")
 prepare_base_manifests
 manifests_sum=$(dir_tree_files_digest "${temp_dir}/manifests")
 
-tar -C "${temp_dir}" -cf "${temp_dir}/manifests.tar" manifests
-tar -C "${temp_dir}" -czf "${temp_dir}/images.tar.gz" images
+tar -C "${temp_dir}" --no-xattrs -cf "${temp_dir}/manifests.tar" manifests
+tar -C "${temp_dir}" --no-xattrs -czf "${temp_dir}/images.tar.gz" images
 cat << EOF > "${temp_dir}/meta.json"
 {"version": "1", "project_name": "$project_name"}
 EOF
