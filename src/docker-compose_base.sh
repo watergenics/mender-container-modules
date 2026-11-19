@@ -101,7 +101,7 @@ comp_stop() {
     local rc=0
 
     echo "Stopping $1"
-    (   
+    (
         cd "$manifests_dir"
         $DOCKER_COMPOSE_CMD \
             --project-name "$project_name" \
@@ -111,7 +111,7 @@ comp_stop() {
     if test "$rc" -ne 0; then
         echo "Failed to stop composition, logs follow:" 1>&2
         cat "$manifests_dir/../compose.log" 1>&2
-        (   
+        (
             cd "$manifests_dir"
             $DOCKER_COMPOSE_CMD \
                 --project-name "$project_name" \
@@ -160,7 +160,7 @@ comp_start() {
     local rc=0
 
     echo "Starting $1"
-    (   
+    (
         cd "$manifests_dir"
         $DOCKER_COMPOSE_CMD \
             --project-name "$project_name" \
@@ -174,7 +174,7 @@ comp_start() {
     if test "$rc" -ne 0; then
         echo "Failed to start composition, logs follow:" 1>&2
         cat "$manifests_dir/../compose.log" 1>&2
-        (   
+        (
             cd "$manifests_dir"
             $DOCKER_COMPOSE_CMD \
                 --project-name "$project_name" \
@@ -274,6 +274,14 @@ install_composition_from_artifact() {
         test -f "$manifest" || continue
         get_manifest_image_ids "$manifest" >> "${PERSISTENT_STORE}/current/image_ids"
     done
+    # multiple services can use the same image
+    # cleanup() and retag_composition_images() need to handle each image once
+    # to avoid the update to return with an error
+    # preserves manifest ordering
+    if [ -f "${PERSISTENT_STORE}/current/image_ids" ]; then
+        awk '!seen[$0]++' "${PERSISTENT_STORE}/current/image_ids" > "${PERSISTENT_STORE}/current/image_ids.tmp"
+        mv "${PERSISTENT_STORE}/current/image_ids.tmp" "${PERSISTENT_STORE}/current/image_ids"
+    fi
     if [ $rc -ne 0 ]; then
         return $rc
     fi

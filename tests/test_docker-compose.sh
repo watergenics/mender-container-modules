@@ -117,7 +117,8 @@ case "\$1" in
         exit 1
         ;;
      images)
-        cat /proc/sys/kernel/random/uuid
+         od -An -N16 -tx1 /dev/urandom | tr -d ' \n'
+         echo
         ;;
      inspect)
         shift 3
@@ -136,7 +137,7 @@ EOF
 
 cleanup_docker_mock() {
     rm -rf "${WORKDIR}/bin"
-    truncate -s0 "$CMDLINE_LOGGER_LOG_FILE"
+    : > "$CMDLINE_LOGGER_LOG_FILE"
 }
 
 declare -a tests
@@ -366,6 +367,103 @@ EOF
     return $rc
 }
 tests+=(test_artifact_install_rollback_cleanup)
+
+test_artifact_install_rollback_cleanup_shared_image() {
+    local rc=0
+
+    prepare_config
+    prepare_expected_file_tree
+    prepare_docker_mock
+
+    # 'docker images...' returns the queried image reference as its ID, so the
+    # IDs in image_ids are predictable.
+    cat << EOF > "${WORKDIR}/bin/docker"
+#!/bin/bash
+case "\$1" in
+     --version|version)
+        exit 0
+        ;;
+     compose)
+        exit 1
+        ;;
+     images)
+        echo "\$4"
+        ;;
+     inspect)
+        shift 3
+        for container_id in "\$@"; do
+            echo "running:no_check"
+        done
+        exit 0
+        ;;
+esac
+echo "\$(basename \$0) \$@" >> "$CMDLINE_LOGGER_LOG_FILE"
+exit 0
+EOF
+
+    # Two services use the same image
+    cat << EOF > "${WORKDIR}/manifests/docker-compose.yml"
+services:
+  lighttpd-a:
+    image: some/lighttpd:latest
+  lighttpd-b:
+    image: some/lighttpd:latest
+  php:
+    image: bad/php:oldest
+EOF
+    tar -C "${WORKDIR}" -cf "${WORKDIR}/artifact-file-tree/files/manifests.tar" manifests
+
+    "${SRCDIR}/docker-compose" ArtifactInstall "${WORKDIR}/artifact-file-tree" > "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -ne 0 ]; then
+        echo "ArtifactInstall failed (exit code $rc), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+    "${SRCDIR}/docker-compose" ArtifactRollback "${WORKDIR}/artifact-file-tree" >> "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -ne 0 ]; then
+        echo "ArtifactRollback failed (exit code $rc), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+
+    if [ -n "$(sort "${PERSISTENT_DIR}/cleanup/image_ids" | uniq -d)" ]; then
+        echo "Duplicate lines in image_ids, contents follow:"
+        cat "${PERSISTENT_DIR}/cleanup/image_ids"
+        return 1
+    fi
+
+    "${SRCDIR}/docker-compose" Cleanup "${WORKDIR}/artifact-file-tree" >> "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
+    if [ $rc -ne 0 ]; then
+        echo "Cleanup failed (exit code $rc), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+
+    cat << EOF | diff -u - "$CMDLINE_LOGGER_LOG_FILE" || rc=$?
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image1.tar
+docker image load --input ${WORKDIR}/artifact-file-tree/tmp/images/image2.tar
+docker images --format {{json .ID}} some/lighttpd:latest
+docker images --format {{json .ID}} some/lighttpd:latest
+docker images --format {{json .ID}} bad/php:oldest
+docker-compose --project-name test-comp up --detach
+docker-compose --project-name test-comp down
+docker rmi --force some/lighttpd:latest
+docker rmi --force bad/php:oldest
+EOF
+    if [ $rc -ne 0 ]; then
+        echo "Unexpected commands executed (see the above diff), logs follow:"
+        cat "${WORKDIR}/docker-compose.log"
+        return $rc
+    fi
+
+    if [ -d "${PERSISTENT_DIR}/cleanup" ]; then
+        echo "'cleanup' directory exists after cleanup"
+        return 1
+    fi
+
+    return $rc
+}
+tests+=(test_artifact_install_rollback_cleanup_shared_image)
 
 test_two_artifacts_install_commit_install_commit_cleanup() {
     local rc=0
@@ -647,7 +745,8 @@ case "\$1" in
             exit 1
         else
             touch "${WORKDIR}/artifact-file-tree/tmp/first_img_query_done"
-            cat /proc/sys/kernel/random/uuid
+            od -An -N16 -tx1 /dev/urandom | tr -d ' \n'
+            echo
         fi
         ;;
      image) # docker image load --input /some/img.tar
@@ -1152,7 +1251,7 @@ test_wait_healthy_timeout() {
     prepare_docker_mock
 
     # Override the inspect state to return containers stuck in starting state
-    sed -i 's/echo "running:no_check"/echo "running:starting"/' "${WORKDIR}/bin/docker"
+    sed -i.bak 's/echo "running:no_check"/echo "running:starting"/' "${WORKDIR}/bin/docker"
 
     "${SRCDIR}/docker-compose" ArtifactInstall "${WORKDIR}/artifact-file-tree" > "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
     if [ $rc -eq 0 ]; then
@@ -1178,7 +1277,7 @@ test_wait_healthy_unhealthy() {
     prepare_docker_mock
 
     # Override the inspect state to return unhealthy containers
-    sed -i 's/echo "running:no_check"/echo "running:unhealthy"/' "${WORKDIR}/bin/docker"
+    sed -i.bak 's/echo "running:no_check"/echo "running:unhealthy"/' "${WORKDIR}/bin/docker"
 
     "${SRCDIR}/docker-compose" ArtifactInstall "${WORKDIR}/artifact-file-tree" > "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
     if [ $rc -eq 0 ]; then
@@ -1204,7 +1303,7 @@ test_wait_healthy_exited() {
     prepare_docker_mock
 
     # Override the inspect state to return exited container
-    sed -i 's/echo "running:no_check"/echo "exited:no_check"/' "${WORKDIR}/bin/docker"
+    sed -i.bak 's/echo "running:no_check"/echo "exited:no_check"/' "${WORKDIR}/bin/docker"
 
     "${SRCDIR}/docker-compose" ArtifactInstall "${WORKDIR}/artifact-file-tree" > "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
     if [ $rc -eq 0 ]; then
