@@ -117,7 +117,8 @@ case "\$1" in
         exit 1
         ;;
      images)
-        cat /proc/sys/kernel/random/uuid
+         od -An -N16 -tx1 /dev/urandom | tr -d ' \n'
+         echo
         ;;
      inspect)
         shift 3
@@ -136,7 +137,7 @@ EOF
 
 cleanup_docker_mock() {
     rm -rf "${WORKDIR}/bin"
-    truncate -s0 "$CMDLINE_LOGGER_LOG_FILE"
+    : > "$CMDLINE_LOGGER_LOG_FILE"
 }
 
 declare -a tests
@@ -744,7 +745,8 @@ case "\$1" in
             exit 1
         else
             touch "${WORKDIR}/artifact-file-tree/tmp/first_img_query_done"
-            cat /proc/sys/kernel/random/uuid
+            od -An -N16 -tx1 /dev/urandom | tr -d ' \n'
+            echo
         fi
         ;;
      image) # docker image load --input /some/img.tar
@@ -1249,7 +1251,7 @@ test_wait_healthy_timeout() {
     prepare_docker_mock
 
     # Override the inspect state to return containers stuck in starting state
-    sed -i 's/echo "running:no_check"/echo "running:starting"/' "${WORKDIR}/bin/docker"
+    sed -i.bak 's/echo "running:no_check"/echo "running:starting"/' "${WORKDIR}/bin/docker"
 
     "${SRCDIR}/docker-compose" ArtifactInstall "${WORKDIR}/artifact-file-tree" > "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
     if [ $rc -eq 0 ]; then
@@ -1275,7 +1277,7 @@ test_wait_healthy_unhealthy() {
     prepare_docker_mock
 
     # Override the inspect state to return unhealthy containers
-    sed -i 's/echo "running:no_check"/echo "running:unhealthy"/' "${WORKDIR}/bin/docker"
+    sed -i.bak 's/echo "running:no_check"/echo "running:unhealthy"/' "${WORKDIR}/bin/docker"
 
     "${SRCDIR}/docker-compose" ArtifactInstall "${WORKDIR}/artifact-file-tree" > "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
     if [ $rc -eq 0 ]; then
@@ -1301,7 +1303,7 @@ test_wait_healthy_exited() {
     prepare_docker_mock
 
     # Override the inspect state to return exited container
-    sed -i 's/echo "running:no_check"/echo "exited:no_check"/' "${WORKDIR}/bin/docker"
+    sed -i.bak 's/echo "running:no_check"/echo "exited:no_check"/' "${WORKDIR}/bin/docker"
 
     "${SRCDIR}/docker-compose" ArtifactInstall "${WORKDIR}/artifact-file-tree" > "${WORKDIR}/docker-compose.log" 2>&1 || rc=$?
     if [ $rc -eq 0 ]; then
